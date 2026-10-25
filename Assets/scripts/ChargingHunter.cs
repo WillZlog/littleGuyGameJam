@@ -174,14 +174,7 @@ public class ChargingHunter : MonoBehaviour
                     if (distance < 3.2f * movementScale) steering = -steering;
                     else if (distance < 4.8f * movementScale) steering = Vector2.zero;
                 }
-                foreach (ChargingHunter enemy in activeEnemies)
-                {
-                    if (enemy == null || enemy == this) continue;
-                    Vector2 away = position - enemy.body.position;
-                    float separation = 1.1f * size;
-                    if (away.sqrMagnitude < separation * separation)
-                        steering += away.normalized * (1f - away.magnitude / separation) * 2f;
-                }
+                steering = AvoidHunters(steering, position, movementScale);
                 chaseVelocity = Vector2.MoveTowards(chaseVelocity,
                     Vector2.ClampMagnitude(steering, 1f) * pursuitSpeed * movementScale, 12f * movementScale * Time.fixedDeltaTime);
                 MoveSolid(position + chaseVelocity * Time.fixedDeltaTime);
@@ -231,6 +224,36 @@ public class ChargingHunter : MonoBehaviour
             if (!collider.isTrigger) return false;
         }
         return false;
+    }
+
+    private Vector2 AvoidHunters(Vector2 desired, Vector2 position, float movementScale)
+    {
+        Vector2 steering = desired;
+        foreach (ChargingHunter enemy in activeEnemies)
+        {
+            if (enemy == null || enemy == this || !enemy.initialized || enemy.consumed
+                || !enemy.isActiveAndEnabled) continue;
+            Vector2 toward = enemy.body.position - position;
+            float distance = toward.magnitude;
+            float spacing = 0.85f * (size + enemy.size);
+            Vector2 away = distance > 0.001f ? -toward / distance
+                : (activeEnemies.IndexOf(this) < activeEnemies.IndexOf(enemy) ? Vector2.left : Vector2.right);
+            if (distance < spacing)
+                steering += away * (1f - distance / spacing) * 3f;
+
+            // Start passing before touching. Both hunters keep the same handedness,
+            // so head-on approaches choose opposite sides instead of cancelling out.
+            float ahead = Vector2.Dot(toward, desired);
+            float sideways = Mathf.Abs(toward.x * desired.y - toward.y * desired.x);
+            float lookAhead = spacing + pursuitSpeed * movementScale * 0.35f;
+            if (desired.sqrMagnitude > 0.01f && ahead > 0f && ahead < lookAhead && sideways < spacing)
+            {
+                Vector2 passing = new Vector2(away.y, -away.x);
+                float urgency = (1f - ahead / lookAhead) * (1f - sideways / spacing);
+                steering += passing * (1f + urgency * 2f);
+            }
+        }
+        return Vector2.ClampMagnitude(steering, 1f);
     }
 
     private void MoveSolid(Vector2 desired)
