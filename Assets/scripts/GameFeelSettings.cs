@@ -8,5 +8,14 @@ public class GameFeelSettings : ScriptableObject
     public AudioClip backgroundMusic;
     [Range(0f, 1f)] public float musicVolume = 0.25f;
     public AudioClip tvSwitchClick;
+    [Range(0f, 1f)] public float soundEffectsVolume = 0.65f;
+    public SoundEffectOverride[] soundEffects;
     [Range(0f, 2f)] public float cameraShake = 1f;
+}
+
+[System.Serializable]
+public struct SoundEffectOverride
+{
+    public GameSound sound;
+    public AudioClip clip;
 }

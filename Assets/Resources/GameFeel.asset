@@ -16,5 +16,7 @@ MonoBehaviour:
   pigVolume: 0.65
   backgroundMusic: {fileID: 8300000, guid: 29e5430c8c8a1574ca888403c2527f55, type: 3}
   musicVolume: 0.25
+  soundEffectsVolume: 0.65
+  soundEffects: []
   tvSwitchClick: {fileID: 8300000, guid: 55079fe5053f43089de530f91487cceb, type: 3}
   cameraShake: 1

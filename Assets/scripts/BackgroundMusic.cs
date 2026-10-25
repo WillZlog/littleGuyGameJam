@@ -10,6 +10,7 @@ public class BackgroundMusic : MonoBehaviour
     private bool spinningUp;
     private float spinupElapsed;
     private float spinupDuration;
+    private bool ducked;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetInstance() => instance = null;
@@ -33,6 +34,7 @@ public class BackgroundMusic : MonoBehaviour
         }
 
         instance.targetVolume = settings.musicVolume;
+        instance.ducked = false;
         if (instance.source.clip == settings.backgroundMusic && instance.source.isPlaying)
         {
             return;
@@ -98,6 +100,11 @@ public class BackgroundMusic : MonoBehaviour
 
             return;
         }
-        source.volume = Mathf.MoveTowards(source.volume, targetVolume, Time.unscaledDeltaTime * 0.35f);
+        source.volume = Mathf.MoveTowards(source.volume, targetVolume * (ducked ? 0.45f : 1f), Time.unscaledDeltaTime * 0.35f);
+    }
+
+    public static void SetDucked(bool value)
+    {
+        if (instance != null) instance.ducked = value;
     }
 }
