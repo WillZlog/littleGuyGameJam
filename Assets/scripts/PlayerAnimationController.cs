@@ -278,7 +278,7 @@ public class PlayerAnimationController : MonoBehaviour
         {
             return;
         }
-
+        animator.SetTrigger("Eat");
         countdownTimer = timeWindow;
         scale = Mathf.Min(maxScale, scale + growthAmount * nutrition);
         HumansEaten++;
