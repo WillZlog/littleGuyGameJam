@@ -3,7 +3,7 @@ Shader "Little Guy/VHS CRT"
     Properties
     {
         _Strength ("Effect Strength", Range(0, 1)) = 1
-        _Curvature ("Screen Curvature", Range(0, 0.3)) = 0.09
+        _Curvature ("Screen Curvature", Range(0, 0.3)) = 0.035
         _Vignette ("Corner Darkness", Range(0, 0.8)) = 0.35
         _ChromaticAberration ("Edge Color Separation", Range(0, 0.012)) = 0.003
         _CornerRadius ("Rounded Corners", Range(0, 0.3)) = 0.1

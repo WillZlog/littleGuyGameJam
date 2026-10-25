@@ -130,6 +130,7 @@ public class MainMenu : MonoBehaviour
         {
             instance.startCanvas.SetActive(false);
         }
+        
 
         instance.RestoreHud();
         Time.timeScale = 1f;

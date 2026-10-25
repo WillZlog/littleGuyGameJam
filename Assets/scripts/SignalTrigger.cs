@@ -16,10 +16,15 @@ public class SignalTrigger : MonoBehaviour
     private bool golden;
     private Vector2 fleeVelocity;
     private Collider2D[] colliders;
+    private Camera gameCamera;
+    private float age;
+    public float OffscreenTime { get; private set; }
+    public bool IsExpiring => lifetime > 0f && lifetime - age <= 1.5f;
 
     private void Awake()
     {
         body = GetComponent<Rigidbody2D>();
+        gameCamera = Camera.main;
         colliders = GetComponentsInChildren<Collider2D>();
         sprites = GetComponentsInChildren<SpriteRenderer>();
         originalColors = new Color[sprites.Length];
@@ -41,10 +46,6 @@ public class SignalTrigger : MonoBehaviour
     private void Start()
     {
         SetPosition(ConstrainPosition(transform.position));
-        if (lifetime > 0f)
-        {
-            Destroy(gameObject, lifetime);
-        }
     }
 
     public void Configure(float foodValue, float minimumSize, bool isGolden = false)
@@ -58,17 +59,32 @@ public class SignalTrigger : MonoBehaviour
     private void Update()
     {
         PlayerAnimationController player = PlayerAnimationController.Instance;
-        if (!golden || (player != null && player.IsGameOver))
+        if (consumed || Time.timeScale == 0f || (player != null && player.IsGameOver))
         {
             return;
         }
 
-        Color tint = Color.Lerp(new Color(1f, 0.65f, 0.12f), new Color(1f, 1f, 0.65f),
-            0.5f + 0.5f * Mathf.Sin(Time.time * 8f));
+        age += Time.deltaTime;
+        OffscreenTime = IsVisible(gameCamera) ? 0f : OffscreenTime + Time.deltaTime;
+        if (lifetime > 0f && age >= lifetime) { Destroy(gameObject); return; }
+        Color tint = golden ? Color.Lerp(new Color(1f, 0.65f, 0.12f), new Color(1f, 1f, 0.65f),
+            0.5f + 0.5f * Mathf.Sin(Time.time * 8f)) : Color.white;
+        if (IsExpiring)
+        {
+            tint.a = Mathf.Lerp(0.45f, 1f, 0.5f + 0.5f * Mathf.Sin(Time.time * 14f));
+            tint.a *= Mathf.Clamp01((lifetime - age) / 0.45f);
+        }
         for (int i = 0; i < sprites.Length; i++)
         {
             sprites[i].color = originalColors[i] * tint;
         }
+    }
+
+    public bool IsVisible(Camera camera)
+    {
+        if (camera == null) return true;
+        Vector3 point = camera.WorldToViewportPoint(transform.position);
+        return point.z > 0f && point.x >= -0.05f && point.x <= 1.05f && point.y >= -0.05f && point.y <= 1.05f;
     }
 
     private void FixedUpdate()

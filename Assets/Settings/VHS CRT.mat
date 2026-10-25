@@ -27,7 +27,7 @@ Material:
     m_Floats:
     - _ChromaticAberration: 0.003
     - _CornerRadius: 0.1
-    - _Curvature: 0.09
+    - _Curvature: 0.035
     - _Grain: 0.009
     - _Scanlines: 0.025
     - _Strength: 1

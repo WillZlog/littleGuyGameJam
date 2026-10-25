@@ -30,6 +30,8 @@ public class PlayerAnimationController : MonoBehaviour
     [Min(0f)] public float sprintRegenDelay = 4f;
     [Min(0f)] public float sprintGainPerSecond = 30f;
     [SerializeField, Range(0.01f, 1f)] private float exhaustionRecoveryFraction = 0.35f;
+    [SerializeField, Range(0f, 1f)] private float staminaRestoredPerHuman = 0.1f;
+    [SerializeField, Min(0f)] private float hungerGraceAfterHit = 1f;
 
     public bool isSprinting;
     public bool isExhausted;
@@ -358,7 +360,8 @@ public class PlayerAnimationController : MonoBehaviour
         }
 
         nextGruntTime = Time.unscaledTime + 0.45f;
-        pigAudio.pitch = hurt ? 0.8f : Random.Range(0.95f, 1.08f);
+        int comboTier = Mathf.Min(4, Mathf.Max(0, Combo - 1) / 3);
+        pigAudio.pitch = hurt ? 0.8f : 0.96f + comboTier * 0.07f + Random.Range(-0.015f, 0.015f);
         pigAudio.Play();
     }
 
@@ -415,7 +418,7 @@ public class PlayerAnimationController : MonoBehaviour
 
         Combo = 0;
         comboRemaining = 0f;
-        countdownTimer = 0f;
+        countdownTimer = Mathf.Max(countdownTimer, hungerGraceAfterHit);
         body.linearVelocity = awayFromEnemy.normalized * 8f * Mathf.Sqrt(WorldScale);
         if (scale <= minimumScale)
         {
@@ -438,9 +441,11 @@ public class PlayerAnimationController : MonoBehaviour
             animator.SetTrigger(Eat);
         }
 
+        Combo++;
         PlayGrunt();
         ShakeCamera(0.035f, 0.12f);
-        Combo++;
+        currentSprint = Mathf.Min(maxSprint, currentSprint + maxSprint * staminaRestoredPerHuman);
+        if (currentSprint >= maxSprint * exhaustionRecoveryFraction) isExhausted = false;
         BestCombo = Mathf.Max(BestCombo, Combo);
         comboRemaining = ComboWindow;
         Score += Mathf.RoundToInt(100f * nutrition) * Mathf.Min(5, 1 + (Combo - 1) / 3);
