@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
 [RequireComponent(typeof(Rigidbody2D))]
@@ -10,7 +11,10 @@ public class PlayerAnimationController : MonoBehaviour
 
     public Slider staminaSlider;
 
-    [SerializeField] private GameObject gameOverPanel;
+    [SerializeField] private GameObject startCanvas;
+
+    [FormerlySerializedAs("gameOverPanel")]
+    [SerializeField] private GameObject gameOverCanvas;
 
     [Min(0f)] public float moveSpeed = 5f;
     [Min(1f)] public float sprintModifier = 1.5f;
@@ -36,7 +40,6 @@ public class PlayerAnimationController : MonoBehaviour
     [SerializeField, Min(0.11f)] private float maxScale = 100f;
     [SerializeField, Min(0.01f)] private float minimumScale = 0.1f;
 
-    [Tooltip("Ascending size thresholds. Reached stages stay unlocked even when hungry.")]
     [SerializeField] private float[] stageThresholds = { 2f, 4f, 8f, 16f, 32f };
     [SerializeField, Min(1.01f)] private float stageZoomMultiplier = 1.65f;
     [SerializeField, Min(0.01f)] private float cameraSmoothTime = 0.6f;
@@ -52,6 +55,13 @@ public class PlayerAnimationController : MonoBehaviour
     public float WorldScale => ScaleForStage(GrowthStage);
     public float NextStageSize => GrowthStage < stageThresholds.Length ? stageThresholds[GrowthStage] : 0f;
     public float ScaleForStage(int stage) => Mathf.Pow(stageZoomMultiplier, Mathf.Max(0, stage));
+    public int Score { get; private set; }
+    public int BestScore { get; private set; }
+    public int Combo { get; private set; }
+    public int BestCombo { get; private set; }
+    public bool IsTired => isExhausted || StaminaNormalized < exhaustionRecoveryFraction;
+    private float comboRemaining;
+    private const float ComboWindow = 3.5f;
 
     private Rigidbody2D body;
     private Animator animator;
@@ -63,7 +73,24 @@ public class PlayerAnimationController : MonoBehaviour
     private float regenDelay;
     private float countdownTimer;
     private bool hasSpeedParameter;
+    private bool hasTiredParameter;
+    private bool hasEatParameter;
     private static readonly int Speed = Animator.StringToHash("Speed");
+    private static readonly int Tired = Animator.StringToHash("IsTired");
+    private static readonly int Eat = Animator.StringToHash("Eat");
+    private float damageImmunity;
+    private float knockbackRemaining;
+    private SpriteRenderer[] playerSprites;
+    private Color[] playerColors;
+    private AudioSource pigAudio;
+    private GameFeelSettings feedbackSettings;
+    private float nextGruntTime;
+    private Vector3 cameraRestPosition;
+    private float shakeRemaining;
+    private float shakeDuration;
+    private float shakeStrength;
+    private float displayScale;
+    private float scaleVelocity;
 
     private void OnValidate()
     {
@@ -97,14 +124,44 @@ public class PlayerAnimationController : MonoBehaviour
         Instance = this;
         body = GetComponent<Rigidbody2D>();
         animator = GetComponent<Animator>();
+        playerSprites = GetComponentsInChildren<SpriteRenderer>();
+        playerColors = new Color[playerSprites.Length];
+        for (int i = 0; i < playerSprites.Length; i++)
+        {
+            playerColors[i] = playerSprites[i].color;
+        }
+
         body.gravityScale = 0f;
         body.freezeRotation = true;
         body.interpolation = RigidbodyInterpolation2D.Interpolate;
+        body.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+        feedbackSettings = Resources.Load<GameFeelSettings>("GameFeel");
+        BackgroundMusic.EnsurePlaying(feedbackSettings);
+        pigAudio = GetComponent<AudioSource>();
+        if (pigAudio == null)
+        {
+            pigAudio = gameObject.AddComponent<AudioSource>();
+        }
+
+        pigAudio.playOnAwake = false;
+        pigAudio.spatialBlend = 0f;
+        pigAudio.volume = feedbackSettings != null ? feedbackSettings.pigVolume : 0.65f;
+        pigAudio.clip = feedbackSettings != null ? feedbackSettings.pigGrunt : null;
 
         if (animator != null)
         {
             foreach (AnimatorControllerParameter parameter in animator.parameters)
             {
+                if (parameter.nameHash == Tired && parameter.type == AnimatorControllerParameterType.Bool)
+                {
+                    hasTiredParameter = true;
+                }
+
+                if (parameter.nameHash == Eat && parameter.type == AnimatorControllerParameterType.Trigger)
+                {
+                    hasEatParameter = true;
+                }
+
                 if (parameter.nameHash == Speed && parameter.type == AnimatorControllerParameterType.Float)
                 {
                     hasSpeedParameter = true;
@@ -119,24 +176,33 @@ public class PlayerAnimationController : MonoBehaviour
         if (gameCamera != null)
         {
             initialCameraSize = gameCamera.orthographicSize;
+            cameraRestPosition = gameCamera.transform.position;
         }
 
         currentSprint = Mathf.Max(1f, maxSprint);
-        countdownTimer = timeWindow;
+        countdownTimer = timeWindow / (1.5f + GrowthStage * 0.25f);
         scale = Mathf.Clamp(scale, minimumScale + 0.01f, maxScale);
+        displayScale = scale;
         PeakSize = scale;
+        BestScore = PlayerPrefs.GetInt("LittleGuy.BestScore", 0);
         UpdateGrowthStage();
 
-        if (gameOverPanel != null)
+        if (gameOverCanvas != null)
         {
-            gameOverPanel.SetActive(false);
+            gameOverCanvas.SetActive(false);
         }
 
         UpdatePresentation();
+        MainMenu.ShowIfNeeded(startCanvas, staminaSlider);
     }
 
     private void Update()
     {
+        if (MainMenu.IsOpen)
+        {
+            return;
+        }
+
         Keyboard keyboard = Keyboard.current;
         Gamepad gamepad = Gamepad.current;
 
@@ -170,10 +236,16 @@ public class PlayerAnimationController : MonoBehaviour
             || (gamepad != null && gamepad.rightShoulder.isPressed);
         UpdateStamina(sprintHeld && movementInput.sqrMagnitude > 0.01f, Time.deltaTime);
         SurvivalTime += Time.deltaTime;
+        damageImmunity = Mathf.Max(0f, damageImmunity - Time.deltaTime);
+        comboRemaining = Mathf.Max(0f, comboRemaining - Time.deltaTime);
+        if (comboRemaining <= 0f)
+        {
+            Combo = 0;
+        }
 
         float hungryDelta = Mathf.Max(0f, Time.deltaTime - countdownTimer);
         countdownTimer = Mathf.Max(0f, countdownTimer - Time.deltaTime);
-        scale = Mathf.Max(minimumScale, scale - shrinkSpeed * hungryDelta);
+        scale = Mathf.Max(minimumScale, scale - shrinkSpeed * 3f * Mathf.Max(1f, scale) * hungryDelta);
 
         if (scale <= minimumScale)
         {
@@ -227,39 +299,89 @@ public class PlayerAnimationController : MonoBehaviour
             return;
         }
 
-        Vector2 target = movementInput * moveSpeed * Mathf.Sqrt(WorldScale) * (isSprinting ? sprintModifier : 1f);
+        if (knockbackRemaining > 0f)
+        {
+            knockbackRemaining = Mathf.Max(0f, knockbackRemaining - Time.fixedDeltaTime);
+            return;
+        }
+
+        Vector2 target = movementInput * moveSpeed * Mathf.Sqrt(WorldScale)
+            * (isSprinting ? sprintModifier : 1f) * (IsTired ? 0.8f : 1f);
         body.linearVelocity = Vector2.MoveTowards(body.linearVelocity, target,
             (movementInput.sqrMagnitude > 0f ? acceleration : deceleration) * Mathf.Sqrt(WorldScale) * Time.fixedDeltaTime);
     }
 
     private void LateUpdate()
     {
-        if (gameCamera == null || !gameCamera.orthographic || IsGameOver)
+        displayScale = Mathf.SmoothDamp(displayScale, scale, ref scaleVelocity, 0.09f,
+            Mathf.Infinity, Time.unscaledDeltaTime);
+        transform.localScale = new Vector3(facingLeft ? -displayScale : displayScale, displayScale, transform.localScale.z);
+
+        if (gameCamera == null || !gameCamera.orthographic)
         {
             return;
         }
 
-        gameCamera.orthographicSize = Mathf.SmoothDamp(gameCamera.orthographicSize,
-            initialCameraSize * WorldScale, ref zoomVelocity, cameraSmoothTime);
+        if (!IsGameOver && Time.timeScale > 0f)
+        {
+            gameCamera.orthographicSize = Mathf.SmoothDamp(gameCamera.orthographicSize,
+                initialCameraSize * WorldScale, ref zoomVelocity, cameraSmoothTime);
+            if (followPlayer)
+            {
+                Vector2 lookAhead = Vector2.ClampMagnitude(body.linearVelocity * 0.08f, 0.4f * WorldScale);
+                Vector3 target = new Vector3(transform.position.x + lookAhead.x, transform.position.y + lookAhead.y, cameraRestPosition.z);
+                cameraRestPosition = Vector3.SmoothDamp(cameraRestPosition, target,
+                    ref followVelocity, Mathf.Max(0.05f, cameraSmoothTime * 0.5f));
+            }
+        }
+        shakeRemaining = Mathf.Max(0f, shakeRemaining - Time.unscaledDeltaTime);
+        float fade = shakeDuration > 0f ? shakeRemaining / shakeDuration : 0f;
+        float noiseTime = Time.unscaledTime * 28f;
+        Vector3 offset = new Vector3(Mathf.PerlinNoise(noiseTime, 0.2f) * 2f - 1f,
+            Mathf.PerlinNoise(0.8f, noiseTime) * 2f - 1f, 0f) * shakeStrength * fade * fade;
+        gameCamera.transform.position = cameraRestPosition + offset;
+    }
 
-        if (!followPlayer)
+    public void ShakeCamera(float strength, float duration)
+    {
+        float amount = strength * Mathf.Sqrt(WorldScale) * (feedbackSettings != null ? feedbackSettings.cameraShake : 1f);
+        shakeStrength = Mathf.Max(shakeRemaining > 0f ? shakeStrength : 0f, amount);
+        shakeDuration = Mathf.Max(shakeRemaining, duration);
+        shakeRemaining = shakeDuration;
+    }
+
+    private void PlayGrunt(bool hurt = false)
+    {
+        if (pigAudio == null || pigAudio.clip == null || (!hurt && Time.unscaledTime < nextGruntTime))
         {
             return;
         }
 
-        Vector3 target = new Vector3(transform.position.x, transform.position.y, gameCamera.transform.position.z);
-        gameCamera.transform.position = Vector3.SmoothDamp(gameCamera.transform.position, target,
-            ref followVelocity, cameraSmoothTime);
+        nextGruntTime = Time.unscaledTime + 0.45f;
+        pigAudio.pitch = hurt ? 0.8f : Random.Range(0.95f, 1.08f);
+        pigAudio.Play();
     }
 
     private void UpdatePresentation()
     {
-        if (animator != null && hasSpeedParameter)
+        for (int i = 0; i < playerSprites.Length; i++)
         {
-            animator.SetFloat(Speed, IsGameOver ? 0f : body.linearVelocity.magnitude / Mathf.Max(0.01f, moveSpeed));
+            playerSprites[i].color = damageImmunity > 0f
+                ? Color.Lerp(playerColors[i], new Color(1f, 0.35f, 0.35f, playerColors[i].a),
+                    0.5f + 0.5f * Mathf.Sin(Time.time * 22f)) : playerColors[i];
         }
 
-        transform.localScale = new Vector3(facingLeft ? -scale : scale, scale, transform.localScale.z);
+        if (animator != null && hasTiredParameter)
+        {
+            animator.SetBool(Tired, IsTired);
+        }
+
+        if (animator != null && hasSpeedParameter)
+        {
+            animator.SetFloat(Speed, IsGameOver ? 0f : body.linearVelocity.magnitude / Mathf.Max(0.01f, moveSpeed),
+                0.08f, Time.deltaTime);
+        }
+
         if (staminaSlider == null)
         {
             return;
@@ -267,10 +389,42 @@ public class PlayerAnimationController : MonoBehaviour
 
         staminaSlider.minValue = 0f;
         staminaSlider.maxValue = maxSprint;
-        staminaSlider.value = currentSprint;
+        staminaSlider.value = Mathf.MoveTowards(staminaSlider.value, currentSprint, maxSprint * 6f * Time.deltaTime);
     }
 
     public void ResetTimer() => ConsumeFood(1f);
+
+    public bool TakeHit(Vector2 awayFromEnemy)
+    {
+        if (IsGameOver || Time.timeScale == 0f || damageImmunity > 0f)
+        {
+            return false;
+        }
+
+        PlayGrunt(true);
+        ShakeCamera(0.22f, 0.32f);
+        damageImmunity = 1.25f;
+        knockbackRemaining = 0.18f;
+        scale = Mathf.Max(minimumScale, scale - Mathf.Max(0.18f, scale * 0.2f));
+        currentSprint = Mathf.Max(0f, currentSprint - maxSprint * 0.25f);
+        regenDelay = Mathf.Max(regenDelay, sprintRegenDelay);
+        if (currentSprint <= 0f)
+        {
+            isExhausted = true;
+        }
+
+        Combo = 0;
+        comboRemaining = 0f;
+        countdownTimer = 0f;
+        body.linearVelocity = awayFromEnemy.normalized * 8f * Mathf.Sqrt(WorldScale);
+        if (scale <= minimumScale)
+        {
+            TriggerGameOver();
+        }
+
+        UpdatePresentation();
+        return true;
+    }
 
     public void ConsumeFood(float nutrition)
     {
@@ -278,8 +432,20 @@ public class PlayerAnimationController : MonoBehaviour
         {
             return;
         }
-        animator.SetTrigger("Eat");
-        countdownTimer = timeWindow;
+
+        if (animator != null && hasEatParameter)
+        {
+            animator.SetTrigger(Eat);
+        }
+
+        PlayGrunt();
+        ShakeCamera(0.035f, 0.12f);
+        Combo++;
+        BestCombo = Mathf.Max(BestCombo, Combo);
+        comboRemaining = ComboWindow;
+        Score += Mathf.RoundToInt(100f * nutrition) * Mathf.Min(5, 1 + (Combo - 1) / 3);
+        BestScore = Mathf.Max(BestScore, Score);
+        countdownTimer = timeWindow / (1.5f + GrowthStage * 0.25f);
         scale = Mathf.Min(maxScale, scale + growthAmount * nutrition);
         HumansEaten++;
         PeakSize = Mathf.Max(PeakSize, scale);
@@ -303,22 +469,37 @@ public class PlayerAnimationController : MonoBehaviour
         }
 
         IsGameOver = true;
+        SaveBestScore();
         isSprinting = false;
         movementInput = Vector2.zero;
         body.linearVelocity = Vector2.zero;
 
-        if (gameOverPanel != null)
+        if (gameOverCanvas != null)
         {
-            gameOverPanel.SetActive(true);
+            gameOverCanvas.SetActive(true);
         }
 
         Time.timeScale = 0f;
     }
 
+    public void StartGame() => MainMenu.BeginGameplay();
+
     public void RestartGame()
     {
+        SaveBestScore();
+        if (gameOverCanvas != null)
+        {
+            gameOverCanvas.SetActive(false);
+        }
+
         Time.timeScale = 1f;
         SceneManager.LoadScene(SceneManager.GetActiveScene().path);
+    }
+
+    private void SaveBestScore()
+    {
+        PlayerPrefs.SetInt("LittleGuy.BestScore", BestScore);
+        PlayerPrefs.Save();
     }
 
     private void OnDestroy()

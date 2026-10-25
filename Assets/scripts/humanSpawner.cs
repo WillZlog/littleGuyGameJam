@@ -20,6 +20,7 @@ public class humanSpawner : MonoBehaviour
     [SerializeField] private GameObject stage5Prefab;
 
     [SerializeField] private GameObject stage6Prefab;
+    [SerializeField] private ChargingHunter attackerPrefab;
 
     [SerializeField, HideInInspector] private GameObject[] stageFoodPrefabs = new GameObject[0];
 
@@ -32,6 +33,8 @@ public class humanSpawner : MonoBehaviour
     private readonly List<GameObject> livingHumans = new List<GameObject>();
     private float spawnTimer;
     private Camera spawnCamera;
+    private int totalSpawned;
+    private ChargingHunter hunter;
     public int ActiveHumans => livingHumans.Count;
 
     private void Start()
@@ -55,16 +58,37 @@ public class humanSpawner : MonoBehaviour
             return;
         }
 
+        if (hunter == null && player != null && player.SurvivalTime >= 3f)
+        {
+            GameObject prefab = GetStagePrefab(0);
+            SpriteRenderer[] renderers = prefab != null ? prefab.GetComponentsInChildren<SpriteRenderer>() : new SpriteRenderer[0];
+            Sprite hunterSprite = null;
+            foreach (SpriteRenderer renderer in renderers)
+            {
+                if (renderer.sprite != null)
+                {
+                    hunterSprite = renderer.sprite;
+                    break;
+                }
+            }
+
+            if (hunterSprite != null)
+            {
+                hunter = ChargingHunter.Create(hunterSprite, player, attackerPrefab);
+            }
+        }
+
         spawnTimer -= Time.deltaTime;
         if (spawnTimer > 0f)
         {
             return;
         }
 
-        spawnTimer = Mathf.Max(0.05f, spawnInterval);
+        spawnTimer = Mathf.Max(0.05f, spawnInterval * 1.25f);
         livingHumans.RemoveAll(item => item == null);
         int stage = player != null ? player.GrowthStage : 0;
-        int count = Mathf.Min(Mathf.Max(1, humans) + stage, Mathf.Max(1, maxHumans) - livingHumans.Count);
+        int populationLimit = Mathf.Min(Mathf.Max(1, maxHumans), 6);
+        int count = Mathf.Min(Mathf.Max(1, humans), populationLimit - livingHumans.Count);
         for (int i = 0; i < count; i++)
         {
             int foodTier = Random.Range(Mathf.Max(0, stage - 1), stage + 1);
@@ -87,7 +111,7 @@ public class humanSpawner : MonoBehaviour
 
             if (food != null)
             {
-                food.Configure(foodScale, 0f);
+                food.Configure(foodScale, 0f, ++totalSpawned % 7 == 0);
             }
 
             livingHumans.Add(clone);
@@ -157,12 +181,20 @@ public class humanSpawner : MonoBehaviour
         }
 
         extents = Vector2.Max(Vector2.zero, extents - Vector2.one * (cameraPadding * foodScale));
+        Vector2 minimum = Vector2.Max(center - extents, ArenaBounds.Min + Vector2.one * 0.6f);
+        Vector2 maximum = Vector2.Min(center + extents, ArenaBounds.Max - Vector2.one * 0.6f);
+        if (minimum.x > maximum.x || minimum.y > maximum.y)
+        {
+            position = default;
+            return false;
+        }
+
         Collider2D playerCollider = player != null ? player.GetComponent<Collider2D>() : null;
         float clearance = playerClearance * foodScale + (playerCollider != null ? playerCollider.bounds.extents.magnitude : 0f);
 
         for (int attempt = 0; attempt < 16; attempt++)
         {
-            position = center + new Vector2(Random.Range(-extents.x, extents.x), Random.Range(-extents.y, extents.y));
+            position = new Vector2(Random.Range(minimum.x, maximum.x), Random.Range(minimum.y, maximum.y));
 
             if (player != null && Vector2.Distance(position, player.transform.position) < clearance)
             {
