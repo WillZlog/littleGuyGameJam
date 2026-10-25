@@ -201,6 +201,11 @@ public class SignalTrigger : MonoBehaviour
 
         consumed = true;
         player.ConsumeFood(nutrition);
+        if (golden)
+        {
+            GameAudio.Play(GameSound.Golden, volume: 0.8f);
+            PixelFeedback.Burst(transform.position, new Color(1f, 0.75f, 0.15f), 12, Mathf.Sqrt(player.WorldScale));
+        }
         Destroy(gameObject);
     }
 }
