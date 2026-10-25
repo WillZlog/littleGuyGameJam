@@ -126,7 +126,6 @@ public class MainMenu : MonoBehaviour
         }
 
         hasStarted = true;
-        GameAudio.Play(GameSound.Start, volume: 0.6f);
         if (instance.startCanvas != null)
         {
             instance.startCanvas.SetActive(false);

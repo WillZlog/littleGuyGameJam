@@ -11,7 +11,6 @@ public class HunterProjectile : MonoBehaviour
     private SpriteRenderer visual;
     private Transform owner;
     private bool spent;
-    private bool passedPlayer;
     private readonly RaycastHit2D[] hits = new RaycastHit2D[32];
 
     public static void Create(Vector2 position, Vector2 direction, float speed, float size,
@@ -47,13 +46,6 @@ public class HunterProjectile : MonoBehaviour
         if (spent || player == null || player.IsGameOver) return;
         float distance = speed * Time.fixedDeltaTime;
         Vector2 next = body.position + direction * distance;
-        Vector2 towardPlayer = (Vector2)player.transform.position - body.position;
-        if (!passedPlayer && towardPlayer.sqrMagnitude < 0.9f * 0.9f * size * size
-            && Vector2.Dot(direction, towardPlayer) < 0f)
-        {
-            passedPlayer = true;
-            GameAudio.Play(GameSound.NearMiss, volume: 0.35f);
-        }
         // Sweep as well as triggering, so fast stars cannot tunnel through bodies or walls.
         int count = Physics2D.CircleCast(body.position, 0.15f * size, direction, ContactFilter2D.noFilter, hits, distance);
         for (int i = 0; i < count; i++) if (TryImpact(hits[i].collider)) return;

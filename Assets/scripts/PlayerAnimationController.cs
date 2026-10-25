@@ -93,10 +93,6 @@ public class PlayerAnimationController : MonoBehaviour
     private float shakeStrength;
     private float displayScale;
     private float scaleVelocity;
-    private Vector2 lastStepPosition;
-    private float stepDistance;
-    private float nextHungerSound;
-    private bool wasExhausted;
 
     private void OnValidate()
     {
@@ -142,7 +138,6 @@ public class PlayerAnimationController : MonoBehaviour
         body.interpolation = RigidbodyInterpolation2D.Interpolate;
         body.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
         feedbackSettings = Resources.Load<GameFeelSettings>("GameFeel");
-        GameAudio.Initialize(feedbackSettings);
         BackgroundMusic.EnsurePlaying(feedbackSettings);
         pigAudio = GetComponent<AudioSource>();
         if (pigAudio == null)
@@ -190,7 +185,6 @@ public class PlayerAnimationController : MonoBehaviour
         countdownTimer = timeWindow / (1.5f + GrowthStage * 0.25f);
         scale = Mathf.Clamp(scale, minimumScale + 0.01f, maxScale);
         displayScale = scale;
-        lastStepPosition = body.position;
         PeakSize = scale;
         BestScore = PlayerPrefs.GetInt("LittleGuy.BestScore", 0);
         UpdateGrowthStage();
@@ -243,7 +237,6 @@ public class PlayerAnimationController : MonoBehaviour
         bool sprintHeld = (keyboard != null && (keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed))
             || (gamepad != null && gamepad.rightShoulder.isPressed);
         UpdateStamina(sprintHeld && movementInput.sqrMagnitude > 0.01f, Time.deltaTime);
-        UpdateSoundFeedback();
         SurvivalTime += Time.deltaTime;
         damageImmunity = Mathf.Max(0f, damageImmunity - Time.deltaTime);
         comboRemaining = Mathf.Max(0f, comboRemaining - Time.deltaTime);
@@ -298,34 +291,6 @@ public class PlayerAnimationController : MonoBehaviour
             {
                 isExhausted = false;
             }
-        }
-    }
-
-    private void UpdateSoundFeedback()
-    {
-        float worldScale = Mathf.Sqrt(WorldScale);
-        float moved = Vector2.Distance(body.position, lastStepPosition);
-        lastStepPosition = body.position;
-        if (movementInput.sqrMagnitude > 0.01f && knockbackRemaining <= 0f && moved < 2f * worldScale)
-        {
-            stepDistance += moved;
-            if (stepDistance >= 0.75f * worldScale)
-            {
-                stepDistance %= 0.75f * worldScale;
-                GameAudio.Play(GameSound.Step, volume: isSprinting ? 0.3f : 0.18f,
-                    pitch: Random.Range(0.9f, 1.1f));
-            }
-        }
-        else stepDistance = 0f;
-        if (isExhausted != wasExhausted)
-        {
-            GameAudio.Play(isExhausted ? GameSound.Exhausted : GameSound.Recovered, volume: 0.55f);
-            wasExhausted = isExhausted;
-        }
-        if (countdownTimer <= 0f && scale < 0.7f && Time.time >= nextHungerSound)
-        {
-            nextHungerSound = Time.time + Mathf.Lerp(0.45f, 1.1f, Mathf.InverseLerp(minimumScale, 0.7f, scale));
-            GameAudio.Play(GameSound.Hunger, volume: 0.35f);
         }
     }
 
@@ -440,8 +405,6 @@ public class PlayerAnimationController : MonoBehaviour
         }
 
         PlayGrunt(true);
-        GameAudio.Play(GameSound.Hurt, volume: 0.85f);
-        PixelFeedback.Burst(transform.position, new Color(1f, 0.4f, 0.35f), 10, Mathf.Sqrt(WorldScale));
         ShakeCamera(0.22f, 0.32f);
         damageImmunity = 1.25f;
         knockbackRemaining = 0.18f;
@@ -480,10 +443,6 @@ public class PlayerAnimationController : MonoBehaviour
 
         Combo++;
         PlayGrunt();
-        GameAudio.Play(GameSound.Eat, volume: 0.65f, pitch: 1f + Mathf.Min(4, (Combo - 1) / 3) * 0.06f);
-        PixelFeedback.Burst(transform.position, new Color(0.9f, 1f, 0.65f), 6, Mathf.Sqrt(WorldScale));
-        if (Combo > 1 && Combo % 3 == 0)
-            GameAudio.Play(GameSound.Combo, volume: 0.4f, pitch: 1f + Mathf.Min(4, Combo / 3 - 1) * 0.1f);
         ShakeCamera(0.035f, 0.12f);
         currentSprint = Mathf.Min(maxSprint, currentSprint + maxSprint * staminaRestoredPerHuman);
         if (currentSprint >= maxSprint * exhaustionRecoveryFraction) isExhausted = false;
@@ -501,16 +460,9 @@ public class PlayerAnimationController : MonoBehaviour
 
     private void UpdateGrowthStage()
     {
-        int previousStage = GrowthStage;
         while (GrowthStage < stageThresholds.Length && PeakSize >= stageThresholds[GrowthStage])
         {
             GrowthStage++;
-        }
-        if (GrowthStage > previousStage && Time.timeScale > 0f)
-        {
-            GameAudio.Play(GameSound.Growth, volume: 0.7f);
-            PixelFeedback.Burst(transform.position, new Color(0.6f, 1f, 0.85f), 14, Mathf.Sqrt(WorldScale));
-            ShakeCamera(0.08f, 0.25f);
         }
     }
 
@@ -522,8 +474,6 @@ public class PlayerAnimationController : MonoBehaviour
         }
 
         IsGameOver = true;
-        GameAudio.Play(GameSound.GameOver, volume: 0.85f);
-        BackgroundMusic.SetDucked(true);
         SaveBestScore();
         isSprinting = false;
         movementInput = Vector2.zero;

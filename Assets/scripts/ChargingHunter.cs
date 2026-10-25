@@ -53,11 +53,6 @@ public class ChargingHunter : MonoBehaviour
     public void Stun(float duration = 1.6f)
     {
         if (consumed || !initialized) return;
-        if (!IsStunned)
-        {
-            GameAudio.Play(GameSound.Stun, body.position, 0.65f);
-            PixelFeedback.Burst(body.position, new Color(0.65f, 0.8f, 1f), 8, size);
-        }
         state = AttackState.Stunned;
         stateTime = Mathf.Max(0.1f, duration);
         attackPoseRemaining = 0f;
@@ -71,7 +66,6 @@ public class ChargingHunter : MonoBehaviour
         Collider2D playerCollider = player.GetComponent<Collider2D>();
         if (playerCollider == null || bodyCollider.Distance(playerCollider).distance > 0.07f * size) return false;
         consumed = true;
-        GameAudio.Play(GameSound.HunterEat, body.position, 0.7f);
         bodyCollider.enabled = false;
         player.ConsumeFood(hunterNutrition * size);
         Destroy(gameObject);
@@ -170,8 +164,6 @@ public class ChargingHunter : MonoBehaviour
                 attackDirection = toPlayer.sqrMagnitude > 0.001f ? toPlayer.normalized : Vector2.right;
                 chaseVelocity = Vector2.zero;
                 state = AttackState.Warning;
-                GameAudio.Play(GameSound.Windup, position, 0.42f,
-                    attackStyle == AttackStyle.Shoot ? 1.2f : 0.9f);
                 stateTime = Mathf.Max(0.35f, warningDuration - player.GrowthStage * 0.035f);
             }
             else
@@ -193,23 +185,17 @@ public class ChargingHunter : MonoBehaviour
             attackPoseRemaining = 0.22f;
             if (attackStyle == AttackStyle.Shoot)
             {
-                GameAudio.Play(GameSound.Throw, position, 0.6f);
                 HunterProjectile.Create(position + attackDirection * 0.45f * size, attackDirection,
                     6.5f * movementScale, size, projectileSprite, transform);
                 Recover();
             }
             else if (attackStyle == AttackStyle.Stab)
             {
-                GameAudio.Play(GameSound.Stab, position, 0.65f, Random.Range(0.95f, 1.05f));
                 missedStab = !StrikePlayer(player, stabReach * size, 0.18f * size);
                 state = AttackState.Stabbing;
                 stateTime = 0.18f;
             }
-            else
-            {
-                GameAudio.Play(GameSound.Dash, position, 0.65f);
-                state = AttackState.Charging; stateTime = ChargeDuration;
-            }
+            else { state = AttackState.Charging; stateTime = ChargeDuration; }
         }
         else if (state == AttackState.Stabbing)
         {
